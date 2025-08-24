@@ -7,4 +7,4 @@ const worker = new Worker('read-pdf', async job => {
     host: 'redis', // Use the service name defined in docker-compose.yml
     port: 6379
   }
-})
+});
