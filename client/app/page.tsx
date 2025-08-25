@@ -80,7 +80,7 @@ export default function Home() {
             width={16}
             height={16}
           />
-          Examples
+          Example
         </a>
       </footer>
     </div>
