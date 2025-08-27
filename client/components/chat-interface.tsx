@@ -5,6 +5,10 @@ import { ChatMessage } from "./chat-message"
 import { TypingIndicator } from "./typing-indicator"
 import { MessageInput } from "./message-input"
 import { UploadModal } from "./upload-modal"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { useEffect, useRef } from "react";
+import { Bot } from "lucide-react"
+
 
 interface Message {
   id: string
@@ -27,6 +31,18 @@ export function ChatInterface() {
   const [isLoading, setIsLoading] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+
+  const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  const isProcessingPDF = false; // Placeholder for PDF processing state
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      scrollToBottom();
+    }, 100);
+    return () => clearTimeout(timeout);
+  }, [messages, isLoading])
 
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return
@@ -67,54 +83,90 @@ export function ChatInterface() {
         role: "assistant",
         timestamp: new Date(),
       }
-      setMessages((prev) => [...prev, successMessage])
+      // setMessages((prev) => [...prev, successMessage])
     }
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative min-h-[calc(100vh-5rem)]">
       {messages.length === 1 && !uploadedFile && (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="text-center max-w-md">
-            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
+        // <div className="flex items-center justify-center p-8">
+        //   <div className="text-center max-w-md">
+        //     <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+        //       <svg className="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        //         <path
+        //           strokeLinecap="round"
+        //           strokeLinejoin="round"
+        //           strokeWidth={2}
+        //           d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        //         />
+        //       </svg>
+        //     </div>
+        //     <h2 className="text-xl font-semibold text-foreground mb-2">Get started with your documents</h2>
+        //     <p className="text-muted-foreground mb-6">
+        //       Upload a PDF document and start asking questions. I&apos;ll help you analyze, summarize, and extract insights
+        //       from your content.
+        //     </p>
+        //     <button
+        //       onClick={() => setShowUploadModal(true)}
+        //       className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3 rounded-lg font-medium transition-colors"
+        //     >
+        //       Upload Your First Document
+        //     </button>
+        //   </div>
+        // </div>
+        <div className="flex items-center justify-center h-full min-h-[400px]">
+          <div className="text-center space-y-6 max-w-md">
+            <div className="w-20 h-20 bg-primary rounded-full flex items-center justify-center mx-auto">
+              <Bot className="w-10 h-10 text-primary-foreground" />
             </div>
-            <h2 className="text-xl font-semibold text-foreground mb-2">Get started with your documents</h2>
-            <p className="text-muted-foreground mb-6">
-              Upload a PDF document and start asking questions. I'll help you analyze, summarize, and extract insights
-              from your content.
-            </p>
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3 rounded-lg font-medium transition-colors"
-            >
-              Upload Your First Document
-            </button>
+            <div className="space-y-3">
+              <h3 className="text-xl font-semibold">
+                {uploadedFile
+                  ? isProcessingPDF
+                    ? "Processing your PDF..."
+                    : "Ready to help!"
+                  : "Welcome to PDF AI Assistant"}
+              </h3>
+              <p className="text-muted-foreground leading-relaxed">
+                {uploadedFile
+                  ? isProcessingPDF
+                    ? "Please wait while I analyze your document. Once complete, you can ask questions about the content."
+                    : "I can answer questions about your PDF document. Try asking about specific topics, summaries, or details from the content."
+                  : "Upload a PDF document to get started. I'll help you analyze and answer questions about its content."}
+              </p>
+            </div>
+            {uploadedFile && !isProcessingPDF && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Example questions:</p>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>• "What is this document about?"</p>
+                  <p>• "Summarize the main points"</p>
+                  <p>• "Find information about [topic]"</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {(messages.length > 1 || uploadedFile) && (
-        <div className="flex-1 overflow-hidden">
+        <div className="pb-28">
           <div className="h-full flex flex-col">
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-              {messages.map((message) => (
-                <ChatMessage key={message.id} message={message} />
-              ))}
-              {isLoading && <TypingIndicator />}
-            </div>
+            <ScrollArea className="h-full">
+              <div className="px-6 py-4 space-y-4">
+                {messages.map((message) => (
+                  <ChatMessage key={message.id} message={message} />
+                ))}
+                {isLoading && <TypingIndicator />}
+                <div ref={bottomRef} />
+              </div>
+            </ScrollArea>
           </div>
         </div>
       )}
 
-      <div className="border-border p-4">
+      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background p-4 z-50">
         <div className="max-w-4xl mx-auto">
           <MessageInput
             inputValue={inputValue}
