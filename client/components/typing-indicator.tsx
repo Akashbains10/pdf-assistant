@@ -4,7 +4,7 @@ import { Bot } from "lucide-react"
 
 export function TypingIndicator() {
   return (
-    <div className="flex items-start space-x-3">
+    <div className="group max-w-4xl mx-auto  flex space-x-3">
       <div className="h-8 w-8 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center">
         <Bot className="h-4 w-4" />
       </div>

@@ -8,6 +8,8 @@ import { UploadModal } from "./upload-modal"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useEffect, useRef } from "react";
 import { Bot } from "lucide-react"
+import { useMutation } from "@tanstack/react-query"
+import { uploadPdfWithProgress } from "@/lib/api"
 
 
 interface Message {
@@ -35,7 +37,11 @@ export function ChatInterface() {
 
   const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: "smooth" });
 
-  const isProcessingPDF = false; // Placeholder for PDF processing state
+  const [isProcessingPDF, setIsProcessingPDF] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number>(0)
+
+  const stopStreamingRef = useRef<boolean>(false)
+  const [isStreaming, setIsStreaming] = useState(false)
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -44,77 +50,162 @@ export function ChatInterface() {
     return () => clearTimeout(timeout);
   }, [messages, isLoading])
 
+  const streamAssistantMessage = async (
+    message: Message,
+    options?: {
+      delayBetweenChars?: number;
+      delayAfterComplete?: number;
+      chunkSize?: number;
+      stopRef?: React.RefObject<boolean>;
+    }
+  ) => {
+    const streamId = `${message.id}-streaming`;
+    const typingSpeed = options?.delayBetweenChars ?? 5;
+    const pauseAfterTyping = options?.delayAfterComplete ?? 500;
+    const chunkSize = options?.chunkSize ?? 4;
+    const stopRef = options?.stopRef;
+
+    setMessages(prev => [...prev, { ...message, id: streamId, content: "" }]);
+
+    let content = "";
+    let i = 0;
+
+    while (i < message.content.length) {
+      if (stopRef?.current) break;
+
+      const chunk = message.content.slice(i, i + chunkSize);
+      content += chunk;
+      i += chunkSize;
+
+      setMessages(prev =>
+        prev.map(msg => (msg.id === streamId ? { ...msg, content } : msg))
+      );
+
+      await new Promise(resolve => setTimeout(resolve, typingSpeed));
+    }
+
+    setMessages(prev =>
+      prev.map(msg => (msg.id === streamId ? { ...msg, id: `${Date.now()}-final` } : msg))
+    );
+
+    await new Promise(r => setTimeout(r, pauseAfterTyping));
+  }
+
   const handleSendMessage = async () => {
-    if (!inputValue.trim()) return
+    if (!inputValue.trim() || isLoading) return
+    stopStreamingRef.current = false
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputValue,
+      content: inputValue.trim(),
       role: "user",
       timestamp: new Date(),
     }
-
     setMessages((prev) => [...prev, userMessage])
     setInputValue("")
     setIsLoading(true)
+    setIsStreaming(true)
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      const simulated = await new Promise<{ content: string }>((resolve) => {
+        const base = uploadedFile
+          ? `Based on your uploaded PDF "${uploadedFile.name}", here's a helpful response to your question: "${userMessage.content}". Let me know if you'd like a summary or to search for a specific topic.`
+          : `I understand you're asking: "${userMessage.content}". Upload a PDF so I can answer using your document's content. Meanwhile, I can still provide general guidance.`
+        setTimeout(() => resolve({ content: base }), 650)
+      })
+
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: uploadedFile
-          ? `Based on your uploaded PDF "${uploadedFile.name}", I can help answer questions about its content. What would you like to know?`
-          : `I understand you're asking about "${inputValue}". Please upload a PDF document first so I can analyze it and provide detailed answers based on the content.`,
+        id: Date.now().toString(),
         role: "assistant",
+        content: simulated.content,
         timestamp: new Date(),
       }
-      setMessages((prev) => [...prev, assistantMessage])
+      await streamAssistantMessage(assistantMessage, {
+        stopRef: stopStreamingRef,
+      })
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: "Sorry, something went wrong.",
+          timestamp: new Date(),
+        },
+      ])
+    } finally {
       setIsLoading(false)
-    }, 1500)
+      setIsStreaming(false)
+    }
   }
 
-  const handleFileUpload = (file: File) => {
-    if (file.type === "application/pdf") {
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      await uploadPdfWithProgress(file, (p) => setUploadProgress(p))
+    },
+    onMutate: async (file) => {
       setUploadedFile(file)
       setShowUploadModal(false)
-      const successMessage: Message = {
-        id: Date.now().toString(),
-        content: `Successfully uploaded "${file.name}". You can now ask me questions about this document!`,
-        role: "assistant",
-        timestamp: new Date(),
-      }
-      // setMessages((prev) => [...prev, successMessage])
-    }
+      setIsProcessingPDF(true)
+      setUploadProgress(0)
+    },
+    onError: (error) => {
+      console.error(error)
+      setUploadedFile(null)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          content: "There was an issue uploading your PDF. Please try again.",
+          role: "assistant",
+          timestamp: new Date(),
+        },
+      ])
+    },
+    onSuccess: async () => {
+      await new Promise((r) => setTimeout(r, 500))
+    },
+    onSettled: () => {
+      setIsProcessingPDF(false)
+      setUploadProgress(0)
+    },
+  })
+
+  const handleFileUpload = async (file: File) => {
+    if (file.type !== "application/pdf") return
+    uploadMutation.mutate(file)
   }
 
   return (
     <div className="relative min-h-[calc(100vh-5rem)]">
+      {isProcessingPDF && (
+        <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+          <div className="w-full max-w-md mx-auto px-6">
+            <div className="bg-card border border-border rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-medium text-foreground truncate pr-3">
+                  Uploading {uploadedFile?.name}
+                </div>
+                <div className="text-xs text-muted-foreground tabular-nums">{uploadProgress}%</div>
+              </div>
+              <div className="h-3 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-[width] duration-150 ease-linear"
+                  style={{
+                    width: `${uploadProgress}%`,
+                    background: "repeating-linear-gradient(45deg, hsl(var(--primary)) 0, hsl(var(--primary)) 10px, hsl(var(--primary)/.8) 10px, hsl(var(--primary)/.8) 20px)",
+                  }}
+                />
+              </div>
+              <div className="mt-3 text-xs text-muted-foreground">
+                Please keep this tab open while your document uploads.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {messages.length === 1 && !uploadedFile && (
-        // <div className="flex items-center justify-center p-8">
-        //   <div className="text-center max-w-md">
-        //     <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-        //       <svg className="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        //         <path
-        //           strokeLinecap="round"
-        //           strokeLinejoin="round"
-        //           strokeWidth={2}
-        //           d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-        //         />
-        //       </svg>
-        //     </div>
-        //     <h2 className="text-xl font-semibold text-foreground mb-2">Get started with your documents</h2>
-        //     <p className="text-muted-foreground mb-6">
-        //       Upload a PDF document and start asking questions. I&apos;ll help you analyze, summarize, and extract insights
-        //       from your content.
-        //     </p>
-        //     <button
-        //       onClick={() => setShowUploadModal(true)}
-        //       className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3 rounded-lg font-medium transition-colors"
-        //     >
-        //       Upload Your First Document
-        //     </button>
-        //   </div>
-        // </div>
         <div className="flex items-center justify-center h-full min-h-[400px]">
           <div className="text-center space-y-6 max-w-md">
             <div className="w-20 h-20 bg-primary rounded-full flex items-center justify-center mx-auto">

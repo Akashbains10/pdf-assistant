@@ -9,6 +9,7 @@ import {
   SignedOut,
   UserButton,
 } from '@clerk/nextjs'
+import { QueryProvider } from "@/components/query-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -49,7 +50,9 @@ export default function RootLayout({
               <UserButton />
             </SignedIn>
           </header> */}
-          {children}
+          <QueryProvider>
+            {children}
+          </QueryProvider>
         </body>
       </html>
     </ClerkProvider>

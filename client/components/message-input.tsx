@@ -22,6 +22,7 @@ export function MessageInput({
   isLoading,
   uploadedFile,
 }: MessageInputProps) {
+  
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
