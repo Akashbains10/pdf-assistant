@@ -9,10 +9,12 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useEffect, useRef } from "react";
 import { Bot } from "lucide-react"
 import { useMutation } from "@tanstack/react-query"
-import { uploadPdfWithProgress } from "@/lib/api"
+import { uploadPdfWithProgress } from "@/lib/api";
+import { streamAssistantMessage } from "@/utils/streamAssistantMessage"
+import { useUploadPdf } from "@/apis/uploadPdf"
 
 
-interface Message {
+export interface Message {
   id: string
   content: string
   role: "user" | "assistant"
@@ -20,6 +22,8 @@ interface Message {
 }
 
 export function ChatInterface() {
+
+  const {mutate: uploadMutate} = useUploadPdf();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
@@ -29,7 +33,7 @@ export function ChatInterface() {
       timestamp: new Date(),
     },
   ])
-  const [inputValue, setInputValue] = useState("")
+  const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -50,46 +54,7 @@ export function ChatInterface() {
     return () => clearTimeout(timeout);
   }, [messages, isLoading])
 
-  const streamAssistantMessage = async (
-    message: Message,
-    options?: {
-      delayBetweenChars?: number;
-      delayAfterComplete?: number;
-      chunkSize?: number;
-      stopRef?: React.RefObject<boolean>;
-    }
-  ) => {
-    const streamId = `${message.id}-streaming`;
-    const typingSpeed = options?.delayBetweenChars ?? 5;
-    const pauseAfterTyping = options?.delayAfterComplete ?? 500;
-    const chunkSize = options?.chunkSize ?? 4;
-    const stopRef = options?.stopRef;
-
-    setMessages(prev => [...prev, { ...message, id: streamId, content: "" }]);
-
-    let content = "";
-    let i = 0;
-
-    while (i < message.content.length) {
-      if (stopRef?.current) break;
-
-      const chunk = message.content.slice(i, i + chunkSize);
-      content += chunk;
-      i += chunkSize;
-
-      setMessages(prev =>
-        prev.map(msg => (msg.id === streamId ? { ...msg, content } : msg))
-      );
-
-      await new Promise(resolve => setTimeout(resolve, typingSpeed));
-    }
-
-    setMessages(prev =>
-      prev.map(msg => (msg.id === streamId ? { ...msg, id: `${Date.now()}-final` } : msg))
-    );
-
-    await new Promise(r => setTimeout(r, pauseAfterTyping));
-  }
+ 
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -120,9 +85,10 @@ export function ChatInterface() {
         content: simulated.content,
         timestamp: new Date(),
       }
-      await streamAssistantMessage(assistantMessage, {
+      await streamAssistantMessage(assistantMessage, setMessages, {
         stopRef: stopStreamingRef,
       })
+
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -173,7 +139,34 @@ export function ChatInterface() {
 
   const handleFileUpload = async (file: File) => {
     if (file.type !== "application/pdf") return
-    uploadMutation.mutate(file)
+    uploadMutate(file)
+    uploadMutation.mutate(file, {
+      onSuccess: () => {
+        setUploadedFile(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            content: "Your file is uploaded successfully.Start asking question",
+            role: "assistant",
+            timestamp: new Date(),
+          },
+        ])
+      },
+      onError: (error) => {
+        console.error(error)
+        setUploadedFile(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            content: "There was an issue uploading your PDF. Please try again.",
+            role: "assistant",
+            timestamp: new Date(),
+          },
+        ])
+      }
+    })
   }
 
   return (
