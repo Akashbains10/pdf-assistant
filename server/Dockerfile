@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Copy package.json and install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 RUN npm install -g nodemon  # install nodemon globally
 
 
@@ -13,7 +13,7 @@ RUN npm install -g nodemon  # install nodemon globally
 COPY . .
 
 # Expose app port
-EXPOSE 3000
+EXPOSE 8000
 
 # Run app
 CMD ["nodemon", "--legacy-watch", "index.js"]

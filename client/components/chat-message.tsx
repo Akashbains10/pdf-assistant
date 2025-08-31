@@ -1,6 +1,8 @@
 "use client"
 
-import { Bot, User } from "lucide-react"
+import { Bot, User } from "lucide-react";
+import moment from "moment";
+
 
 interface Message {
   id: string
@@ -32,8 +34,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <div className="text-sm font-medium text-foreground">
               {message.role === "user" ? "You" : "AI Assistant"}
             </div>
-            <div className="text-foreground leading-relaxed">{message.content}</div>
-            <div className="text-xs text-muted-foreground">{message.timestamp.toLocaleTimeString()}</div>
+            <div className="text-foreground leading-relaxed whitespace-pre-wrap">{message.content}</div>
+            <div className="text-xs text-muted-foreground">{moment(message.timestamp).format("LT")}</div>
           </div>
         </div>
       </div>

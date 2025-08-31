@@ -1,18 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ChatMessage } from "./chat-message"
 import { TypingIndicator } from "./typing-indicator"
 import { MessageInput } from "./message-input"
 import { UploadModal } from "./upload-modal"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useEffect, useRef } from "react";
 import { Bot } from "lucide-react"
-import { useMutation } from "@tanstack/react-query"
-import { uploadPdfWithProgress } from "@/lib/api";
 import { streamAssistantMessage } from "@/utils/streamAssistantMessage"
 import { useUploadPdf } from "@/apis/uploadPdf"
-
+import { useChatWithAssistant } from "@/apis/chatwithAssistant"
 
 export interface Message {
   id: string
@@ -22,39 +19,32 @@ export interface Message {
 }
 
 export function ChatInterface() {
-
-  const {mutate: uploadMutate} = useUploadPdf();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      content:
-        "Hello! I'm your AI document assistant. Upload a PDF to get started, and I'll help you analyze, summarize, and answer questions about your document.",
-      role: "assistant",
-      timestamp: new Date(),
-    },
-  ])
-  const [inputValue, setInputValue] = useState("");
+  const [messages, setMessages] = useState<Message[]>([])
+  const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
 
-  const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  const { refetch } = useChatWithAssistant({
+    message: inputValue,
+    config: {enabled: false}
+  });
+
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const { mutate: uploadMutate, isPending } = useUploadPdf()
 
   const [isProcessingPDF, setIsProcessingPDF] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<number>(0)
-
   const stopStreamingRef = useRef<boolean>(false)
-  const [isStreaming, setIsStreaming] = useState(false)
+
+  const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: "smooth" })
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      scrollToBottom();
-    }, 100);
-    return () => clearTimeout(timeout);
+      scrollToBottom()
+    }, 100)
+    return () => clearTimeout(timeout)
   }, [messages, isLoading])
-
- 
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -67,29 +57,29 @@ export function ChatInterface() {
       timestamp: new Date(),
     }
     setMessages((prev) => [...prev, userMessage])
-    setInputValue("")
+    // setInputValue("")
     setIsLoading(true)
-    setIsStreaming(true)
 
     try {
       const simulated = await new Promise<{ content: string }>((resolve) => {
         const base = uploadedFile
-          ? `Based on your uploaded PDF "${uploadedFile.name}", here's a helpful response to your question: "${userMessage.content}". Let me know if you'd like a summary or to search for a specific topic.`
-          : `I understand you're asking: "${userMessage.content}". Upload a PDF so I can answer using your document's content. Meanwhile, I can still provide general guidance.`
+          ? `Based on your uploaded PDF "${uploadedFile.name}", here's a helpful response to your question: "${userMessage.content}".`
+          : `I understand you're asking: "${userMessage.content}". Upload a PDF so I can answer using your document's content.`
         setTimeout(() => resolve({ content: base }), 650)
       })
+
+      const { data: assistantResponse } = await refetch();
 
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: "assistant",
-        content: simulated.content,
+        content: assistantResponse?.message,
         timestamp: new Date(),
       }
       await streamAssistantMessage(assistantMessage, setMessages, {
         stopRef: stopStreamingRef,
       })
-
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -101,61 +91,39 @@ export function ChatInterface() {
       ])
     } finally {
       setIsLoading(false)
-      setIsStreaming(false)
     }
   }
 
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      await uploadPdfWithProgress(file, (p) => setUploadProgress(p))
-    },
-    onMutate: async (file) => {
-      setUploadedFile(file)
-      setShowUploadModal(false)
-      setIsProcessingPDF(true)
-      setUploadProgress(0)
-    },
-    onError: (error) => {
-      console.error(error)
-      setUploadedFile(null)
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          content: "There was an issue uploading your PDF. Please try again.",
-          role: "assistant",
-          timestamp: new Date(),
-        },
-      ])
-    },
-    onSuccess: async () => {
-      await new Promise((r) => setTimeout(r, 500))
-    },
-    onSettled: () => {
-      setIsProcessingPDF(false)
-      setUploadProgress(0)
-    },
-  })
-
   const handleFileUpload = async (file: File) => {
     if (file.type !== "application/pdf") return
-    uploadMutate(file)
-    uploadMutation.mutate(file, {
-      onSuccess: () => {
-        setUploadedFile(null);
+
+    setUploadedFile(file)
+    setShowUploadModal(false)
+    setIsProcessingPDF(true)
+    setUploadProgress(0)
+
+    uploadMutate(file, {
+      onSuccess: async () => {
+        await new Promise((r) => setTimeout(r, 1500)) // simulate processing
+        setIsProcessingPDF(false)
+
+        // push assistant success message into chat
         setMessages((prev) => [
           ...prev,
           {
             id: Date.now().toString(),
-            content: "Your file is uploaded successfully.Start asking question",
+            content:
+              "🎉 Your PDF is ready! You can now ask me questions about it. Example questions:\n\n•  What is this document about?\n•  Summarize the main points\n•  Find information about [topic]",
             role: "assistant",
             timestamp: new Date(),
           },
         ])
+
       },
       onError: (error) => {
         console.error(error)
-        setUploadedFile(null);
+        setUploadedFile(null)
+        setIsProcessingPDF(false)
         setMessages((prev) => [
           ...prev,
           {
@@ -165,76 +133,68 @@ export function ChatInterface() {
             timestamp: new Date(),
           },
         ])
-      }
+      },
     })
   }
 
   return (
     <div className="relative min-h-[calc(100vh-5rem)]">
+      {/* PDF Processing Loader */}
       {isProcessingPDF && (
         <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
-          <div className="w-full max-w-md mx-auto px-6">
-            <div className="bg-card border border-border rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-medium text-foreground truncate pr-3">
-                  Uploading {uploadedFile?.name}
-                </div>
-                <div className="text-xs text-muted-foreground tabular-nums">{uploadProgress}%</div>
-              </div>
-              <div className="h-3 w-full rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-[width] duration-150 ease-linear"
-                  style={{
-                    width: `${uploadProgress}%`,
-                    background: "repeating-linear-gradient(45deg, hsl(var(--primary)) 0, hsl(var(--primary)) 10px, hsl(var(--primary)/.8) 10px, hsl(var(--primary)/.8) 20px)",
-                  }}
-                />
-              </div>
-              <div className="mt-3 text-xs text-muted-foreground">
-                Please keep this tab open while your document uploads.
-              </div>
-            </div>
+          <div className="bg-card border border-border rounded-2xl p-6 shadow-lg text-center">
+            <svg
+              className="mx-auto h-12 w-12 text-primary animate-spin"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth="1.5"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              ></circle>
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 
+                0 0 5.373 0 12h4zm2 
+                5.291A7.962 7.962 0 014 
+                12H0c0 3.042 1.135 
+                5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+            <h3 className="mt-2 text-sm font-semibold text-foreground">Processing PDF</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              We're preparing your document for chat. This may take a moment.
+            </p>
           </div>
         </div>
       )}
 
-      {messages.length === 1 && !uploadedFile && (
+      {/* Welcome State (only if no messages yet and no PDF uploaded) */}
+      {messages.length === 0 && !uploadedFile && !isProcessingPDF && (
         <div className="flex items-center justify-center h-full min-h-[400px]">
           <div className="text-center space-y-6 max-w-md">
             <div className="w-20 h-20 bg-primary rounded-full flex items-center justify-center mx-auto">
               <Bot className="w-10 h-10 text-primary-foreground" />
             </div>
-            <div className="space-y-3">
-              <h3 className="text-xl font-semibold">
-                {uploadedFile
-                  ? isProcessingPDF
-                    ? "Processing your PDF..."
-                    : "Ready to help!"
-                  : "Welcome to PDF AI Assistant"}
-              </h3>
-              <p className="text-muted-foreground leading-relaxed">
-                {uploadedFile
-                  ? isProcessingPDF
-                    ? "Please wait while I analyze your document. Once complete, you can ask questions about the content."
-                    : "I can answer questions about your PDF document. Try asking about specific topics, summaries, or details from the content."
-                  : "Upload a PDF document to get started. I'll help you analyze and answer questions about its content."}
-              </p>
-            </div>
-            {uploadedFile && !isProcessingPDF && (
-              <div className="space-y-3">
-                <p className="text-sm font-medium">Example questions:</p>
-                <div className="space-y-2 text-sm text-muted-foreground">
-                  <p>• "What is this document about?"</p>
-                  <p>• "Summarize the main points"</p>
-                  <p>• "Find information about [topic]"</p>
-                </div>
-              </div>
-            )}
+            <h3 className="text-xl font-semibold">Welcome to PDF AI Assistant</h3>
+            <p className="text-muted-foreground leading-relaxed">
+              Upload a PDF document to get started. I'll help you analyze and answer questions about
+              its content.
+            </p>
           </div>
         </div>
       )}
 
-      {(messages.length > 1 || uploadedFile) && (
+      {/* Chat Section (after first message or after PDF ready) */}
+      {(messages.length > 0 || uploadedFile) && !isProcessingPDF && (
         <div className="pb-28">
           <div className="h-full flex flex-col">
             <ScrollArea className="h-full">
@@ -250,6 +210,7 @@ export function ChatInterface() {
         </div>
       )}
 
+      {/* Input */}
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background p-4 z-50">
         <div className="max-w-4xl mx-auto">
           <MessageInput

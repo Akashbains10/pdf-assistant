@@ -9,7 +9,7 @@ services:
     build: ./server
     container_name: node_backend
     ports:
-      - "3000:3000"
+      - "8000:8000"
     volumes:
       - ./server:/app
       - /app/node_modules

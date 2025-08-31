@@ -1,0 +1,286 @@
+"use client"
+
+import { useState } from "react"
+import { ChatMessage } from "./chat-message"
+import { TypingIndicator } from "./typing-indicator"
+import { MessageInput } from "./message-input"
+import { UploadModal } from "./upload-modal"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { useEffect, useRef } from "react";
+import { Bot, LoaderCircle } from "lucide-react"
+import { useMutation } from "@tanstack/react-query"
+import { uploadPdfWithProgress } from "@/lib/api";
+import { streamAssistantMessage } from "@/utils/streamAssistantMessage"
+import { uploadPdf, useUploadPdf } from "@/apis/uploadPdf"
+
+
+export interface Message {
+  id: string
+  content: string
+  role: "user" | "assistant"
+  timestamp: Date
+}
+
+export function ChatInterface() {
+
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "1",
+      content:
+        "Hello! I'm your AI document assistant. Upload a PDF to get started, and I'll help you analyze, summarize, and answer questions about your document.",
+      role: "assistant",
+      timestamp: new Date(),
+    },
+  ]);
+  const [inputValue, setInputValue] = useState("");
+  const [isLoading, setIsLoading] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const { mutate: uploadMutate, isPending } = useUploadPdf();
+
+
+  const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  const [isProcessingPDF, setIsProcessingPDF] = useState(false)
+
+  const stopStreamingRef = useRef<boolean>(false)
+  const [isStreaming, setIsStreaming] = useState(false)
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      scrollToBottom();
+    }, 100);
+    return () => clearTimeout(timeout);
+  }, [messages, isLoading])
+
+
+
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isLoading) return
+    stopStreamingRef.current = false
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: inputValue.trim(),
+      role: "user",
+      timestamp: new Date(),
+    }
+    setMessages((prev) => [...prev, userMessage])
+    setInputValue("")
+    setIsLoading(true)
+    setIsStreaming(true)
+
+    try {
+      const simulated = await new Promise<{ content: string }>((resolve) => {
+        const base = uploadedFile
+          ? `Based on your uploaded PDF "${uploadedFile.name}", here's a helpful response to your question: "${userMessage.content}". Let me know if you'd like a summary or to search for a specific topic.`
+          : `I understand you're asking: "${userMessage.content}". Upload a PDF so I can answer using your document's content. Meanwhile, I can still provide general guidance.`
+        setTimeout(() => resolve({ content: base }), 650)
+      })
+
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: simulated.content,
+        timestamp: new Date(),
+      }
+      await streamAssistantMessage(assistantMessage, setMessages, {
+        stopRef: stopStreamingRef,
+      })
+
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: "Sorry, something went wrong.",
+          timestamp: new Date(),
+        },
+      ])
+    } finally {
+      setIsLoading(false)
+      setIsStreaming(false)
+    }
+  }
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      await uploadPdfWithProgress(file, (p) => setUploadProgress(p))
+    },
+    onMutate: async (file) => {
+      setUploadedFile(file)
+      setShowUploadModal(false)
+      setIsProcessingPDF(true)
+      setUploadProgress(0)
+    },
+    onError: (error) => {
+      console.error(error)
+      setUploadedFile(null)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          content: "There was an issue uploading your PDF. Please try again.",
+          role: "assistant",
+          timestamp: new Date(),
+        },
+      ])
+    },
+    onSuccess: async () => {
+      await new Promise((r) => setTimeout(r, 500))
+    },
+    onSettled: () => {
+      setIsProcessingPDF(false)
+      setUploadProgress(0)
+    },
+  })
+
+  const handleFileUpload = async (file: File) => {
+    if (file.type !== "application/pdf") return
+
+    const onUploadProgress = (progressEvent: ProgressEvent) => {
+      console.log(progressEvent, 'progressEvent');
+      const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+      setUploadProgress(percentCompleted);
+    }
+
+    uploadMutate({ file, onUploadProgress }, {
+      onSuccess: () => {
+        setUploadedFile(null);
+        setShowUploadModal(false);
+        setIsProcessingPDF(true);
+        setTimeout(() => {
+          setIsProcessingPDF(false);
+        }, 2000);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            content: "🎉 Your PDF is ready! Go ahead and ask me anything about it.",
+            role: "assistant",
+            timestamp: new Date(),
+          },
+        ]);
+      },
+      onError: (error) => {
+        console.error(error);
+        setUploadedFile(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            content: "There was an issue uploading your PDF. Please try again.",
+            role: "assistant",
+            timestamp: new Date(),
+          },
+        ]);
+      },
+    });
+  }
+
+  return (
+    <div className="relative min-h-[calc(100vh-5rem)]">
+      
+
+      {isProcessingPDF && !isPending && (
+        <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+          <div className="w-full max-w-md mx-auto px-6">
+            <div className="bg-card border border-border rounded-2xl p-6 shadow-lg">
+              <div className="text-center">
+                <svg className="mx-auto h-12 w-12 text-primary animate-spin" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <h3 className="mt-2 text-sm font-semibold text-foreground">Processing PDF</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  We're preparing your document for chat. This may take a moment.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {messages?.length > 1 && !uploadedFile && (
+        <div className="flex items-center justify-center h-full min-h-[400px]">
+          <div className="text-center space-y-6 max-w-md">
+            <div className="w-20 h-20 bg-primary rounded-full flex items-center justify-center mx-auto">
+              <Bot className="w-10 h-10 text-primary-foreground" />
+            </div>
+            <div className="space-y-3">
+              <h3 className="text-xl font-semibold">
+                {uploadedFile
+                  ? isProcessingPDF
+                    ? "Processing your PDF..."
+                    : "Ready to help!"
+                  : "Welcome to PDF AI Assistant"}
+              </h3>
+              <p className="text-muted-foreground leading-relaxed">
+                {uploadedFile
+                  ? isProcessingPDF
+                    ? "Please wait while I analyze your document. Once complete, you can ask questions about the content."
+                    : "I can answer questions about your PDF document. Try asking about specific topics, summaries, or details from the content."
+                  : "Upload a PDF document to get started. I'll help you analyze and answer questions about its content."}
+              </p>
+            </div>
+            {uploadedFile && !isProcessingPDF && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Example questions:</p>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>• "What is this document about?"</p>
+                  <p>• "Summarize the main points"</p>
+                  <p>• "Find information about [topic]"</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {(messages.length > 1 || uploadedFile) && (
+        <div className="pb-28">
+          <div className="h-full flex flex-col">
+            <ScrollArea className="h-full">
+              <div className="px-6 py-4 space-y-4">
+                {messages.map((message) => (
+                  <ChatMessage key={message.id} message={message} />
+                ))}
+                {isLoading && <TypingIndicator />}
+                <div ref={bottomRef} />
+              </div>
+            </ScrollArea>
+          </div>
+        </div>
+      )}
+
+      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background p-4 z-50">
+        <div className="max-w-4xl mx-auto">
+          <MessageInput
+            inputValue={inputValue}
+            setInputValue={setInputValue}
+            onSendMessage={handleSendMessage}
+            onUploadClick={() => setShowUploadModal(true)}
+            isLoading={isLoading}
+            uploadedFile={uploadedFile}
+          />
+        </div>
+      </div>
+
+      <UploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onFileUpload={handleFileUpload}
+        uploadedFile={uploadedFile}
+      />
+    </div>
+  )
+}
+
+
+
+// the content of this code is well written but the conditional handling of the initial messages are disturbed in this component initialy I want to show a welcome message which is not working but after uploading a pdf I want to show a processing loader and after successfully pdf upload show pdf success message in assistant with some helper questions example but currently it is not working as expected so please fix that issue and also make sure that the loading spinner is shown when the pdf is being processed

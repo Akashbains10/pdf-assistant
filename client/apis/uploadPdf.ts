@@ -1,11 +1,12 @@
-import { axios } from "@/lib/axios"
+import { axios } from "@/lib/axios";
 import { useMutation } from "@tanstack/react-query";
 
-export const uploadPdf = (payload: File | null) => {
-    const formData = new FormData();
-   if (payload) formData.append('file', payload)
-    return axios.post('/assistant/upload', formData)
-}
+export const uploadPdf = (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  return axios.post('/assistant/upload', formData);
+};
 
 export const useUploadPdf = () => {
     return useMutation({

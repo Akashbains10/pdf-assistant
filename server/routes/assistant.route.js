@@ -19,6 +19,7 @@ const queue = new Queue('read-pdf', {
 
 // ================= Upload PDF =================
 router.post('/upload', upload.single('file'), async (req, res) => {
+
   const counts = await queue.getJobCounts();
   console.log('Current job counts:', counts);
 
@@ -58,7 +59,7 @@ router.get('/chat', async (req, res) => {
       ],
     });
 
-    return res.json({
+    return res.status(200).json({
       message: assistantResponse.choices[0].message.content,
       docs: result,
     });
